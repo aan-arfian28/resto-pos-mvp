@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS printers;
+DROP TYPE IF EXISTS printer_type;
