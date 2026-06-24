@@ -1,38 +1,22 @@
-export type SpiceLevel = 0 | 1 | 2 | 3;
-
-export interface MenuItemOption {
+export interface Category {
   id: string;
   name: string;
-  type: "spice" | "notes" | "choice";
-  choices?: string[];
-  required: boolean;
-  priceAdjustment?: number;
-}
-
-export interface MenuCategory {
-  id: string;
-  name: string;
-  slug: string;
-  sortOrder: number;
-  isActive: boolean;
+  parent_id?: string | null;
+  created_at?: string;
+  parent?: Category | null;
+  children?: Category[];
 }
 
 export interface MenuItem {
   id: string;
+  category_id?: string | null;
   name: string;
-  slug: string;
-  description: string;
-  price: number;
-  categoryId: string;
-  category?: MenuCategory;
-  image?: string;
-  isAvailable: boolean;
-  isFavorite: boolean;
-  spiceLevel?: SpiceLevel;
-  options?: MenuItemOption[];
-  preparationTime?: number;
-  estimatedMinutes?: number;
-  sortOrder: number;
-  createdAt: string;
-  updatedAt: string;
+  description?: string;
+  base_price: number;
+  image_url?: string;
+  delivery_markup_percent: number;
+  is_available: boolean;
+  created_at?: string;
+  updated_at?: string;
+  category?: Category | null;
 }

@@ -19,6 +19,8 @@ type Opex struct {
 	User *User `gorm:"foreignKey:UserID" json:"user,omitempty"`
 }
 
+func (Opex) TableName() string { return "opex" }
+
 func (o *Opex) BeforeCreate(tx *gorm.DB) error {
 	if o.ID == uuid.Nil {
 		o.ID = uuid.New()

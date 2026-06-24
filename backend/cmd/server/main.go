@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/bistroflow/backend/internal/activitylog"
 	"github.com/bistroflow/backend/internal/auth"
@@ -17,6 +18,7 @@ import (
 	"github.com/bistroflow/backend/internal/report"
 	"github.com/bistroflow/backend/internal/settings"
 	"github.com/bistroflow/backend/internal/shift"
+	"github.com/bistroflow/backend/internal/printer"
 	ws "github.com/bistroflow/backend/internal/websocket"
 	"github.com/bistroflow/backend/pkg/database"
 	"github.com/bistroflow/backend/pkg/ratelimit"
@@ -75,6 +77,9 @@ func main() {
 	opexService := opex.NewService(opexRepo)
 	reportService := report.NewService(reportRepo)
 	activityLogService := activitylog.NewService(activityLogRepo)
+	printerRepo := printer.NewRepository(db)
+	printerService := printer.NewService(printerRepo, wsHub)
+	printerHandler := printer.NewHandler(printerService)
 
 	// Initialize handlers
 	authHandler := auth.NewHandler(authService)
@@ -123,9 +128,23 @@ func main() {
 			owner := protected.Group("")
 			owner.Use(middleware.OwnerOnly())
 			{
-				// Dashboard
+				// Dashboard — real aggregated data
 				owner.GET("/dashboard", func(c *gin.Context) {
-					response.Success(c, http.StatusOK, gin.H{"message": "Owner dashboard"})
+					summary, _ := reportService.GetSummary(
+						time.Now().AddDate(0, 0, -30).Format("2006-01-02")+" 00:00:00",
+						time.Now().Format("2006-01-02")+" 23:59:59",
+					)
+					topItems, _ := reportService.GetTopItems(
+						time.Now().AddDate(0, 0, -30).Format("2006-01-02")+" 00:00:00",
+						time.Now().Format("2006-01-02")+" 23:59:59",
+						5,
+					)
+					lowStock, _ := inventoryService.GetLowStock()
+					response.Success(c, http.StatusOK, gin.H{
+						"summary":   summary,
+						"top_items": topItems,
+						"low_stock": lowStock,
+					})
 				})
 
 				// Employees
@@ -142,8 +161,7 @@ func main() {
 				owner.PUT("/categories/:id", menuHandler.UpdateCategory)
 				owner.DELETE("/categories/:id", menuHandler.DeleteCategory)
 
-				// Menu items (owner management)
-				owner.GET("/menu", menuHandler.ListMenuItems)
+				// Menu items (owner management — write + get by ID)
 				owner.GET("/menu/:id", menuHandler.GetMenuItem)
 				owner.POST("/menu", menuHandler.CreateMenuItem)
 				owner.PUT("/menu/:id", menuHandler.UpdateMenuItem)
@@ -181,15 +199,30 @@ func main() {
 
 				// Shift History
 				owner.GET("/shifts/history", shiftHandler.GetHistory)
+
+				// Printers
+				owner.GET("/printers", printerHandler.List)
+				owner.GET("/printers/:id", printerHandler.GetByID)
+				owner.POST("/printers", printerHandler.Create)
+				owner.PUT("/printers/:id", printerHandler.Update)
+				owner.DELETE("/printers/:id", printerHandler.Delete)
+				owner.POST("/printers/:id/test", printerHandler.TestPrint)
 			}
+
+			// Menu (shared read — both roles)
+			protected.GET("/menu", func(c *gin.Context) {
+				role := middleware.GetRole(c)
+				if role == "owner" {
+					menuHandler.ListMenuItems(c)
+				} else {
+					menuHandler.ListAvailableMenu(c)
+				}
+			})
 
 			// Cashier-only routes
 			cashier := protected.Group("")
 			cashier.Use(middleware.CashierOnly())
 			{
-				// Menu (read for cashier)
-				cashier.GET("/menu", menuHandler.ListAvailableMenu)
-
 				// Shift
 				cashier.GET("/shift/active", shiftHandler.GetActiveShift)
 				cashier.POST("/shift/open", shiftHandler.OpenShift)

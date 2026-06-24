@@ -40,7 +40,7 @@ function getDefaultSettings(): StoredSettings {
     taxRate: 0.11,
     serviceChargeEnabled: true,
     serviceChargeRate: 0.05,
-    tokenEnabled: false,
+    tokenEnabled: true,
     printerEnabled: false,
     autoPrint: false,
   };

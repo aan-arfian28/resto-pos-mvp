@@ -8,12 +8,19 @@ import {
   Clock,
   User,
   LayoutDashboard,
+  Hash,
+  Bike,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { useCartStore } from "@/stores/cartStore";
 import { usePosStore } from "@/stores/posStore";
 import { useShiftStore } from "@/stores/shiftStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { useNotificationStore } from "@/stores/notificationStore";
+import { savePendingOrder } from "@/db/pendingSync";
+import { orderService } from "@/services/orderService";
+import { calculateDeliveryFee, DELIVERY_DISTANCES } from "@/lib/deliveryMarkup";
 import { MenuGrid } from "@/components/pos/MenuGrid";
 import { CartPanel } from "@/components/pos/CartPanel";
 import { OrderModeSelector } from "@/components/pos/OrderModeSelector";
@@ -22,29 +29,49 @@ import { BillHoldList } from "@/components/pos/BillHoldList";
 import { OpenShiftDialog, EndShiftDialog } from "@/components/pos/ShiftDialog";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { formatTime } from "@/lib/utils";
-import type { PaymentMethod } from "@/types";
+import type { DeliveryDistance } from "@/lib/deliveryMarkup";
 
 export default function PosPage() {
   const router = useRouter();
   const { user, logout } = useAuthStore();
-  const { clearCart, items, grandTotal } = useCartStore();
+  const { clearCart, items, grandTotal, buildOrderPayload } = useCartStore();
   const {
     orderMode,
+    tableNumber,
+    customerName,
     isShiftOpen,
     activeView,
     heldBills,
     setActiveView,
+    setTableNumber,
     addHeldBill,
     removeHeldBill,
     resetOrder,
   } = usePosStore();
-  const { currentShift, openShift, endShift } = useShiftStore();
-  const { ppnEnabled } = useSettingsStore();
+  const { currentShift, openShift, endShift, fetchActiveShift } =
+    useShiftStore();
+  const { ppnEnabled, taxRate, tokenEnabled, loadSettings } = useSettingsStore();
+  const { isOnline } = useOnlineStatus();
+  const addNotification = useNotificationStore((s) => s.addNotification);
 
   const [showPayment, setShowPayment] = useState(false);
   const [showOpenShift, setShowOpenShift] = useState(false);
   const [showEndShift, setShowEndShift] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [deliveryDistance, setDeliveryDistance] =
+    useState<DeliveryDistance>("medium");
+
+  // Fetch active shift + load settings on mount
+  React.useEffect(() => {
+    fetchActiveShift();
+    loadSettings();
+  }, []);
+
+  // Sync settings to cart tax rate
+  React.useEffect(() => {
+    const rate = ppnEnabled ? taxRate : 0;
+    useCartStore.getState().setTaxRate(rate);
+  }, [ppnEnabled, taxRate]);
 
   // Open shift check
   React.useEffect(() => {
@@ -53,18 +80,23 @@ export default function PosPage() {
     }
   }, [currentShift, isShiftOpen]);
 
-  const handleOpenShift = async (openingBalance: number, notes?: string) => {
+  // Compute delivery fee when mode is delivery
+  const deliveryFee =
+    orderMode === "delivery" ? calculateDeliveryFee(deliveryDistance) : 0;
+  const totalWithDelivery = grandTotal + deliveryFee;
+
+  const handleOpenShift = async (modalAwal: number) => {
     try {
-      await openShift(openingBalance, notes);
+      await openShift(modalAwal);
       setShowOpenShift(false);
     } catch {
       // Error handled by store
     }
   };
 
-  const handleEndShift = async (closingBalance: number, notes?: string) => {
+  const handleEndShift = async (saldoAktual?: number) => {
     try {
-      await endShift(closingBalance, notes);
+      const report = await endShift(saldoAktual);
       setShowEndShift(false);
     } catch {
       // Error handled by store
@@ -76,26 +108,56 @@ export default function PosPage() {
     setShowPayment(true);
   };
 
-  const handlePaymentComplete = (
-    method: PaymentMethod,
+  const handlePaymentComplete = async (
+    method: string,
     amount: number,
     change: number
   ) => {
     setIsProcessing(true);
 
-    // Simulate payment processing
-    setTimeout(() => {
+    try {
+      // Map UI order mode (dine-in) to API format (dine_in)
+      const orderTypeMap: Record<string, string> = {
+        "dine-in": "dine_in",
+        takeaway: "takeaway",
+        delivery: "delivery",
+      };
+      const apiOrderType: string = orderTypeMap[orderMode] || "dine_in";
+
+      // Set payment state first so buildOrderPayload includes it
       useCartStore.getState().setPayment(method, amount, change);
-      useCartStore.getState().markAsPaid();
+
+      // Build API-compatible payload via store method
+      const payload = buildOrderPayload(
+        currentShift?.id || "",
+        apiOrderType,
+        tableNumber || null
+      );
+
+      if (isOnline) {
+        // Online: call API
+        await orderService.createOrder(payload as any);
+      } else {
+        // Offline: save to IndexedDB for later sync
+        await savePendingOrder(payload);
+        addNotification(
+          "info",
+          "Transaksi tersimpan lokal – menunggu sinkronisasi"
+        );
+      }
+
       setShowPayment(false);
       setIsProcessing(false);
 
-      // Clear cart and reset
+      // Clear cart and reset after a brief pause
       setTimeout(() => {
         clearCart();
         resetOrder();
       }, 2000);
-    }, 1000);
+    } catch {
+      addNotification("error", "Gagal memproses pembayaran");
+      setIsProcessing(false);
+    }
   };
 
   const handleHold = () => {
@@ -106,7 +168,7 @@ export default function PosPage() {
       id: `hold-${Date.now()}`,
       orderNumber: `H${String(heldBills.length + 1).padStart(3, "0")}`,
       itemCount: activeItems.reduce((sum, i) => sum + i.quantity, 0),
-      total: grandTotal,
+      total: totalWithDelivery,
       heldAt: new Date().toISOString(),
     };
 
@@ -127,69 +189,44 @@ export default function PosPage() {
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 dark:bg-dark-900">
-      {/* Minimal Header */}
-      <header className="shrink-0 bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-700 px-4 py-2">
+      {/* Header */}
+      <header className="shrink-0 bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-700 px-6 py-2">
         <div className="flex items-center justify-between">
-          {/* Left */}
-          <div className="flex items-center gap-4">
-            <h1 className="text-lg font-bold text-gray-900 dark:text-dark-50">
-              BistroFlow POS
-            </h1>
-            <div className="hidden sm:flex items-center gap-1.5 text-xs text-gray-500 dark:text-dark-400">
-              <Clock size={14} />
-              <span id="current-time">{formatTime(new Date())}</span>
-            </div>
-            {currentShift && (
-              <div className="hidden md:flex items-center gap-1.5 text-xs text-green-600">
-                <span className="w-2 h-2 rounded-full bg-green-500" />
-                <span>Shift #{currentShift.id.slice(0, 6)}</span>
-              </div>
-            )}
+          {/* Left: title + order mode */}
+          <div className="flex items-center gap-5">
+            <h1 className="text-lg font-bold text-gray-900 dark:text-dark-50">BistroFlow</h1>
+            <OrderModeSelector />
           </div>
 
-          {/* Right */}
-          <div className="flex items-center gap-2">
-            <OrderModeSelector />
-
-            <div className="w-px h-6 bg-gray-200 dark:bg-dark-700 mx-1" />
-
-            {/* Owner Dashboard Link */}
-            {user?.role === "owner" && (
-              <button
-                onClick={() => router.push("/owner/dashboard")}
-                className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-dark-700 transition-colors"
-                title="Dashboard Owner"
-              >
-                <LayoutDashboard size={18} />
-              </button>
+          {/* Right: table + shift + user */}
+          <div className="flex items-center gap-3">
+            {tokenEnabled && orderMode === "dine_in" && (
+              <input
+                type="text" value={tableNumber} onChange={(e) => setTableNumber(e.target.value)}
+                placeholder="No. Meja"
+                className="w-20 px-2.5 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-dark-600 bg-white dark:bg-dark-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
             )}
-
-            {/* End Shift */}
+            {orderMode === "delivery" && (
+              <select value={deliveryDistance} onChange={(e) => setDeliveryDistance(e.target.value as DeliveryDistance)}
+                className="px-2 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-dark-600 bg-white dark:bg-dark-800">
+                {DELIVERY_DISTANCES.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+              </select>
+            )}
+            {currentShift?.id && (
+              <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                #{currentShift.id.slice(0, 6)}
+              </span>
+            )}
             {currentShift && (
-              <button
-                onClick={() => setShowEndShift(true)}
-                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 dark:bg-red-900/20 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
-              >
+              <button onClick={() => setShowEndShift(true)} className="text-xs font-medium text-red-600 hover:text-red-700">
                 Tutup Shift
               </button>
             )}
-
-            {/* User Info */}
-            <div className="flex items-center gap-2 pl-2 border-l border-gray-200 dark:border-dark-700">
-              <div className="w-7 h-7 rounded-full bg-brand-600 flex items-center justify-center text-white text-xs font-bold">
-                {user?.fullName?.charAt(0) || "U"}
-              </div>
-              <span className="hidden lg:inline text-sm text-gray-700 dark:text-dark-200">
-                {user?.fullName}
-              </span>
-              <button
-                onClick={handleLogout}
-                className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                title="Logout"
-              >
-                <LogOut size={16} />
-              </button>
-            </div>
+            <button onClick={handleLogout} className="text-xs text-gray-500 hover:text-red-500" title="Logout">
+              <LogOut size={16} />
+            </button>
           </div>
         </div>
       </header>
@@ -219,7 +256,7 @@ export default function PosPage() {
               {items.filter((i) => !i.isVoided).length} item
             </p>
             <p className="text-lg font-bold text-brand-600">
-              {formatCurrency(grandTotal)}
+              {formatCurrency(totalWithDelivery)}
             </p>
           </div>
           <button
@@ -237,6 +274,7 @@ export default function PosPage() {
         isOpen={showPayment}
         onClose={() => setShowPayment(false)}
         onPaymentComplete={handlePaymentComplete}
+        total={totalWithDelivery}
       />
 
       {/* Shift Dialogs */}
@@ -251,7 +289,7 @@ export default function PosPage() {
           isOpen={showEndShift}
           onClose={() => setShowEndShift(false)}
           onConfirm={handleEndShift}
-          totalSales={grandTotal}
+          totalSales={totalWithDelivery}
           totalOrders={items.filter((i) => !i.isVoided).length}
           openingBalance={currentShift.openingBalance || 0}
         />

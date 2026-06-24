@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/authStore";
 import { OfflineBanner } from "@/components/ui/OfflineBanner";
 
@@ -10,18 +9,29 @@ export default function CashierLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const router = useRouter();
-  const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
+  const { isAuthenticated, isLoading } = useAuthStore();
 
   useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
+    const token = localStorage.getItem("bf_token");
+    const storedUser = localStorage.getItem("bf_user");
 
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.push("/login");
+    if (!token || token === "undefined" || !storedUser || storedUser === "undefined") {
+      localStorage.removeItem("bf_token");
+      localStorage.removeItem("bf_user");
+      window.location.replace("/login");
+      return;
     }
-  }, [isLoading, isAuthenticated, router]);
+
+    try {
+      const user = JSON.parse(storedUser);
+      if (!user?.role) throw new Error("bad user");
+      useAuthStore.setState({ user, token, isAuthenticated: true, isLoading: false });
+    } catch {
+      localStorage.removeItem("bf_token");
+      localStorage.removeItem("bf_user");
+      window.location.replace("/login");
+    }
+  }, []);
 
   if (isLoading || !isAuthenticated) {
     return (

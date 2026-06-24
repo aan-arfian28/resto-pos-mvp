@@ -34,7 +34,7 @@ export function SalesChart({ data, isLoading = false, period = "month" }: SalesC
     );
   }
 
-  if (data.length === 0) {
+  if (!data || data.length === 0) {
     return (
       <div className="flex items-center justify-center h-64 text-gray-400 dark:text-dark-500">
         <p className="text-sm">Belum ada data penjualan</p>

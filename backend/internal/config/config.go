@@ -8,7 +8,16 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
+
+	"github.com/joho/godotenv"
 )
+
+func init() {
+	// Try multiple locations: project root (when running from backend/), then cwd
+	_ = godotenv.Load("../.env") // running from backend/cmd/server
+	_ = godotenv.Load(".env")    // running from project root
+	_ = godotenv.Load()          // default
+}
 
 type Config struct {
 	DBHost     string

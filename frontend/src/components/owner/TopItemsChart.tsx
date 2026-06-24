@@ -36,7 +36,7 @@ export function TopItemsChart({ items, isLoading = false }: TopItemsChartProps) 
     );
   }
 
-  if (items.length === 0) {
+  if (!items || items.length === 0) {
     return (
       <div className="flex items-center justify-center h-48 text-gray-400 dark:text-dark-500">
         <p className="text-sm">Belum ada data penjualan</p>
@@ -44,12 +44,17 @@ export function TopItemsChart({ items, isLoading = false }: TopItemsChartProps) 
     );
   }
 
-  const chartData: ChartData[] = items.map((item) => ({
-    name: item.name,
-    shortName: item.name.length > 15 ? item.name.substring(0, 15) + "..." : item.name,
-    quantity: item.quantity,
-    revenue: item.revenue,
-  }));
+  const chartData: ChartData[] = items.map((item) => {
+    const name = (item as any).item_name || item.name || "Unknown";
+    const quantity = (item as any).total_qty || item.quantity || 0;
+    const revenue = (item as any).total_value || item.revenue || 0;
+    return {
+      name,
+      shortName: name.length > 15 ? name.substring(0, 15) + "..." : name,
+      quantity,
+      revenue,
+    };
+  });
 
   const CustomTooltip = ({
     active,

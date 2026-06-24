@@ -20,7 +20,7 @@ func (h *Handler) GetActiveShift(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	shift, err := h.service.GetActiveShift(userID)
 	if err != nil {
-		response.Success(c, http.StatusOK, gin.H{"shift": nil})
+		response.Success(c, http.StatusOK, nil)
 		return
 	}
 	response.Success(c, http.StatusOK, shift)

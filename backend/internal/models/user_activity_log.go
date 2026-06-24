@@ -19,6 +19,8 @@ type UserActivityLog struct {
 	User *User `gorm:"foreignKey:UserID" json:"user,omitempty"`
 }
 
+func (UserActivityLog) TableName() string { return "user_activity_log" }
+
 func (l *UserActivityLog) BeforeCreate(tx *gorm.DB) error {
 	if l.ID == uuid.Nil {
 		l.ID = uuid.New()

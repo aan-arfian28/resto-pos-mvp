@@ -1,75 +1,40 @@
 import { api } from "./api";
-import type { Order } from "@/types";
+
+interface OrderItemRequest {
+  menu_item_id: string;
+  quantity: number;
+  price: number;
+  notes?: string;
+}
+
+interface CreateOrderRequest {
+  shift_id?: string;
+  type: "dine_in" | "takeaway" | "delivery";
+  table_number?: string;
+  items: OrderItemRequest[];
+  payment_method: "cash" | "debit" | "credit" | "qris" | "other";
+  amount_received?: number;
+  original_timestamp?: string;
+}
+
+interface OrderResponse {
+  order_id: string;
+  subtotal: number;
+  tax_amount: number;
+  grand_total: number;
+  change_amount?: number;
+}
 
 export const orderService = {
-  createOrder: async (data: {
-    items: Array<{
-      menuItemId: string;
-      quantity: number;
-      spiceLevel?: number;
-      notes?: string;
-      price: number;
-    }>;
-    mode: "dine-in" | "takeaway" | "delivery";
-    tableNumber?: string;
-    customerName?: string;
-    paymentMethod?: string;
-    amountPaid?: number;
-    notes?: string;
-  }): Promise<Order> => {
-    return api.post<Order>("/orders", data);
+  createOrder: async (data: CreateOrderRequest): Promise<OrderResponse> => {
+    return api.post<OrderResponse>("/orders", data);
   },
 
-  getOrders: async (params?: {
-    status?: string;
-    date?: string;
-    shiftId?: string;
-  }): Promise<Order[]> => {
-    const queryParams = new URLSearchParams();
-    if (params?.status) queryParams.set("status", params.status);
-    if (params?.date) queryParams.set("date", params.date);
-    if (params?.shiftId) queryParams.set("shiftId", params.shiftId);
-
-    const query = queryParams.toString();
-    return api.get<Order[]>(`/orders${query ? `?${query}` : ""}`);
+  batchSync: async (orders: CreateOrderRequest[]): Promise<{ success: boolean; order_id: string; error?: string }[]> => {
+    return api.post("/orders/batch", orders);
   },
 
-  getOrder: async (id: string): Promise<Order> => {
-    return api.get<Order>(`/orders/${id}`);
-  },
-
-  voidOrderItem: async (
-    orderId: string,
-    itemId: string,
-    reason: "Salah Input" | "Pelanggan Batal"
-  ): Promise<Order> => {
-    return api.patch<Order>(`/orders/${orderId}/items/${itemId}/void`, { reason });
-  },
-
-  processPayment: async (
-    orderId: string,
-    payment: {
-      method: string;
-      amount: number;
-      change?: number;
-    }
-  ): Promise<Order> => {
-    return api.post<Order>(`/orders/${orderId}/payment`, payment);
-  },
-
-  holdOrder: async (orderId: string): Promise<Order> => {
-    return api.patch<Order>(`/orders/${orderId}/hold`);
-  },
-
-  resumeOrder: async (orderId: string): Promise<Order> => {
-    return api.patch<Order>(`/orders/${orderId}/resume`);
-  },
-
-  getHeldOrders: async (): Promise<Order[]> => {
-    return api.get<Order[]>("/orders/held");
-  },
-
-  batchSync: async (orders: Order[]): Promise<{ synced: number; failed: number }> => {
-    return api.post<{ synced: number; failed: number }>("/orders/batch-sync", { orders });
+  getOrder: async (id: string): Promise<any> => {
+    return api.get(`/orders/${id}`);
   },
 };

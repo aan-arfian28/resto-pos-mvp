@@ -1,66 +1,45 @@
-import type { SpiceLevel } from "./menu";
-
-export type OrderStatus =
-  | "pending"
-  | "confirmed"
-  | "preparing"
-  | "ready"
-  | "served"
-  | "completed"
-  | "cancelled"
-  | "voided";
-
-export type OrderMode = "dine-in" | "takeaway" | "delivery";
-
-export type PaymentMethod = "cash" | "qris" | "debit" | "credit" | "gopay" | "ovo";
-
+export type OrderType = "dine_in" | "takeaway" | "delivery";
+export type OrderStatus = "draft" | "completed" | "voided";
+export type PaymentMethod = "cash" | "debit" | "credit" | "qris" | "other";
 export type VoidReason = "Salah Input" | "Pelanggan Batal";
 
 export interface OrderItem {
   id: string;
-  menuItemId: string;
-  name: string;
-  price: number;
+  order_id?: string;
+  menu_item_id: string;
   quantity: number;
-  spiceLevel?: SpiceLevel;
+  price: number;
   notes?: string;
-  isVoided: boolean;
-  voidReason?: VoidReason;
-  voidedAt?: string;
+  is_void?: boolean;
+  void_reason?: string;
+  created_at?: string;
+  menu_item?: { name: string; base_price: number };
+}
+
+export interface Order {
+  id: string;
+  shift_id?: string;
+  user_id: string;
+  type: OrderType;
+  table_number?: string;
+  tax_enabled: boolean;
+  tax_rate: number;
+  tax_amount: number;
   subtotal: number;
+  grand_total: number;
+  payment_method: PaymentMethod;
+  amount_received?: number;
+  change_amount?: number;
+  status: OrderStatus;
+  is_synced: boolean;
+  original_timestamp?: string;
+  created_at: string;
+  updated_at: string;
+  items?: OrderItem[];
 }
 
 export interface Payment {
   method: PaymentMethod;
   amount: number;
   change?: number;
-  reference?: string;
-  paidAt: string;
-}
-
-export interface Order {
-  id: string;
-  orderNumber: string;
-  items: OrderItem[];
-  status: OrderStatus;
-  mode: OrderMode;
-  tableNumber?: string;
-  customerName?: string;
-  subtotal: number;
-  taxRate: number;
-  taxAmount: number;
-  deliveryFee: number;
-  serviceCharge: number;
-  discount: number;
-  grandTotal: number;
-  payment?: Payment;
-  paymentStatus: "unpaid" | "partial" | "paid" | "refunded";
-  cashierId: string;
-  cashierName?: string;
-  notes?: string;
-  isHeld: boolean;
-  isSynced: boolean;
-  createdAt: string;
-  updatedAt: string;
-  paidAt?: string;
 }

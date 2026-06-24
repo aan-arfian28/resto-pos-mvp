@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState, useEffect, useRef } from "react";
 import { useTheme } from "next-themes";
 import {
   UtensilsCrossed,
@@ -10,34 +9,49 @@ import {
   Eye,
   EyeOff,
   LogIn,
-  AlertCircle,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Toast } from "@/components/ui/Toast";
-import { cn } from "@/lib/utils";
 
 export default function LoginPage() {
-  const router = useRouter();
   const { theme, setTheme } = useTheme();
-  const { login, isAuthenticated, isLoading, error, clearError } = useAuthStore();
+  const { login, isLoading, error, clearError, isAuthenticated, user } = useAuthStore();
+  const [mounted, setMounted] = useState(false);
+  const hasRedirected = useRef(false);
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showError, setShowError] = useState(false);
 
+  // Prevent hydration mismatch with useTheme
+  useEffect(() => { setMounted(true); }, []);
+
+  // Handle "already logged in" on mount
   useEffect(() => {
-    if (isAuthenticated) {
-      const user = useAuthStore.getState().user;
-      if (user?.role === "owner") {
-        router.push("/owner/dashboard");
-      } else {
-        router.push("/cashier/pos");
-      }
+    if (hasRedirected.current) return;
+    const storedUser = localStorage.getItem("bf_user");
+    if (storedUser && storedUser !== "undefined") {
+      try {
+        const u = JSON.parse(storedUser);
+        if (u?.role === "owner" || u?.role === "cashier") {
+          hasRedirected.current = true;
+          window.location.replace(u.role === "owner" ? "/owner/dashboard" : "/cashier/pos");
+        }
+      } catch {}
     }
-  }, [isAuthenticated, router]);
+  }, []);
+
+  // Handle "just logged in" — reacts to Zustand state change after login()
+  useEffect(() => {
+    if (hasRedirected.current) return;
+    if (isAuthenticated && user) {
+      hasRedirected.current = true;
+      window.location.replace(user.role === "owner" ? "/owner/dashboard" : "/cashier/pos");
+    }
+  }, [isAuthenticated, user]);
 
   useEffect(() => {
     if (error) {

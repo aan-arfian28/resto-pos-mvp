@@ -64,6 +64,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   checkAuth: () => {
+    set({ isLoading: true });
     const token = authService.getStoredToken();
     const user = authService.getStoredUser();
     if (token && user) {
@@ -71,12 +72,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         user,
         token,
         isAuthenticated: true,
+        isLoading: false,
       });
     } else {
       set({
         user: null,
         token: null,
         isAuthenticated: false,
+        isLoading: false,
       });
     }
   },

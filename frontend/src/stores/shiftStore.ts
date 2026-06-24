@@ -1,63 +1,66 @@
 "use client";
 
 import { create } from "zustand";
-import type { Shift } from "@/types";
 import { shiftService } from "@/services/shiftService";
+
+interface Shift {
+  id: string;
+  user_id: string;
+  modal_awal: number;
+  status: "open" | "closed";
+  start_time: string;
+  end_time?: string;
+  total_tunai?: number;
+  total_void?: number;
+  saldo_akhir?: number;
+  saldo_aktual?: number;
+}
 
 interface ShiftState {
   currentShift: Shift | null;
-  isLoading: boolean;
+  loading: boolean;
   error: string | null;
 
   fetchActiveShift: () => Promise<void>;
-  openShift: (openingBalance: number, notes?: string) => Promise<Shift>;
-  endShift: (closingBalance: number, notes?: string) => Promise<void>;
+  openShift: (modalAwal: number) => Promise<void>;
+  endShift: (saldoAktual?: number) => Promise<any>;
   clearError: () => void;
 }
 
-export const useShiftStore = create<ShiftState>((set, get) => ({
+export const useShiftStore = create<ShiftState>((set) => ({
   currentShift: null,
-  isLoading: false,
+  loading: false,
   error: null,
 
   fetchActiveShift: async () => {
-    set({ isLoading: true, error: null });
+    set({ loading: true, error: null });
     try {
       const shift = await shiftService.getActive();
-      set({ currentShift: shift, isLoading: false });
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Gagal memuat shift";
-      set({ error: message, isLoading: false });
+      set({ currentShift: shift, loading: false });
+    } catch {
+      set({ currentShift: null, loading: false });
     }
   },
 
-  openShift: async (openingBalance, notes) => {
-    set({ isLoading: true, error: null });
+  openShift: async (modalAwal) => {
+    set({ loading: true, error: null });
     try {
-      const shift = await shiftService.openShift({ openingBalance, notes });
-      set({ currentShift: shift, isLoading: false });
-      return shift;
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Gagal membuka shift";
-      set({ error: message, isLoading: false });
+      const shift = await shiftService.openShift(modalAwal);
+      set({ currentShift: shift, loading: false });
+    } catch (err: any) {
+      set({ error: err?.message || "Gagal membuka shift", loading: false });
       throw err;
     }
   },
 
-  endShift: async (closingBalance, notes) => {
-    const { currentShift } = get();
-    if (!currentShift) throw new Error("Tidak ada shift aktif");
-
-    set({ isLoading: true, error: null });
+  endShift: async (saldoAktual?) => {
+    set({ loading: true, error: null });
     try {
-      await shiftService.endShift(currentShift.id, { closingBalance, notes });
-      set({ currentShift: null, isLoading: false });
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Gagal menutup shift";
-      set({ error: message, isLoading: false });
+      const report = await shiftService.endShift(saldoAktual);
+      set({ currentShift: null, loading: false });
+      return report;
+    } catch (err: any) {
+      set({ error: err?.message || "Gagal menutup shift", loading: false });
       throw err;
     }
   },

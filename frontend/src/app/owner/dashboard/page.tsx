@@ -1,14 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
-  TrendingUp,
-  TrendingDown,
   DollarSign,
   ShoppingCart,
   Star,
-  AlertTriangle,
-  Clock,
+  TrendingDown,
 } from "lucide-react";
 import { BentoGrid, BentoItem } from "@/components/owner/BentoGrid";
 import { MetricCard } from "@/components/owner/MetricCard";
@@ -16,58 +13,187 @@ import { TopItemsChart } from "@/components/owner/TopItemsChart";
 import { LowStockCard } from "@/components/owner/LowStockCard";
 import { SalesChart } from "@/components/owner/SalesChart";
 import { PeriodSelector, type PeriodPreset } from "@/components/owner/PeriodSelector";
-import { Card, CardHeader, CardTitle } from "@/components/ui/Card";
+import { CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { Spinner } from "@/components/ui/Spinner";
+import { api } from "@/services/api";
 import { formatCurrency } from "@/lib/formatCurrency";
 import type { DailySales, TopItem, InventoryItem } from "@/types";
 
-// Mock Data
-const mockDailySales: DailySales[] = Array.from({ length: 30 }).map((_, i) => {
-  const date = new Date(2024, 5, i + 1);
-  return {
-    date: date.toISOString().split("T")[0],
-    totalOrders: Math.floor(Math.random() * 50) + 10,
-    totalRevenue: Math.floor(Math.random() * 5000000) + 500000,
-    totalTax: Math.floor(Math.random() * 500000),
-    totalDiscount: Math.floor(Math.random() * 100000),
-    averageOrderValue: Math.floor(Math.random() * 150000) + 30000,
-  };
-});
+// ── Backend API response shapes (snake_case from Go, unwrapped by api.ts) ──
 
-const mockTopItems: TopItem[] = [
-  { menuItemId: "1", name: "Nasi Goreng Spesial", quantity: 145, revenue: 4350000, percentage: 18 },
-  { menuItemId: "2", name: "Mie Ayam Bakso", quantity: 120, revenue: 2400000, percentage: 15 },
-  { menuItemId: "3", name: "Ayam Bakar Madu", quantity: 98, revenue: 3430000, percentage: 12 },
-  { menuItemId: "4", name: "Es Teh Manis", quantity: 200, revenue: 1000000, percentage: 10 },
-  { menuItemId: "5", name: "Soto Ayam", quantity: 85, revenue: 1700000, percentage: 8 },
-];
+interface BackendSummary {
+  total_transactions: number;
+  gross_revenue: number;
+  total_tax: number;
+  total_void: number;
+  total_opex: number;
+  gross_profit: number;
+}
 
-const mockLowStock: InventoryItem[] = [
-  { id: "1", name: "Minyak Goreng", sku: "MYK-001", category: "Bahan Pokok", currentStock: 2, minimumStock: 10, unit: "L", costPerUnit: 18000 },
-  { id: "2", name: "Telur Ayam", sku: "TLR-001", category: "Protein", currentStock: 5, minimumStock: 20, unit: "Kg", costPerUnit: 28000 },
-  { id: "3", name: "Bawang Merah", sku: "BWR-001", category: "Bumbu", currentStock: 3, minimumStock: 10, unit: "Kg", costPerUnit: 35000 },
-  { id: "4", name: "Kecap Manis", sku: "KCP-001", category: "Saus", currentStock: 8, minimumStock: 15, unit: "Botol", costPerUnit: 12000 },
-  { id: "5", name: "Cabai Rawit", sku: "CBR-001", category: "Bumbu", currentStock: 1, minimumStock: 5, unit: "Kg", costPerUnit: 45000 },
-];
+interface BackendTopItem {
+  menu_item_id: string;
+  item_name: string;
+  total_qty: number;
+  total_value: number;
+}
+
+interface BackendRawMaterial {
+  id: string;
+  name: string;
+  unit: string;
+  current_stock: number;
+  minimum_stock: number;
+  updated_at?: string;
+}
+
+interface DashboardResponse {
+  summary: BackendSummary;
+  top_items: BackendTopItem[];
+  low_stock: BackendRawMaterial[];
+}
+
+interface BackendDailySale {
+  date: string;
+  revenue: number;
+  orders: number;
+}
+
+// ── Helpers ──
+
+function periodToRange(period: PeriodPreset): { from: string; to: string } {
+  const now = new Date();
+  const to = now.toISOString().split("T")[0];
+
+  let from: Date;
+  switch (period) {
+    case "this-week":
+      from = new Date(now);
+      from.setDate(now.getDate() - 7);
+      break;
+    case "this-month":
+      from = new Date(now);
+      from.setDate(now.getDate() - 30);
+      break;
+    case "this-quarter":
+      from = new Date(now);
+      from.setDate(now.getDate() - 90);
+      break;
+    case "this-year":
+      from = new Date(now);
+      from.setDate(now.getDate() - 365);
+      break;
+    default:
+      from = new Date(now);
+      from.setDate(now.getDate() - 30);
+  }
+
+  return { from: from.toISOString().split("T")[0], to };
+}
+
+function mapToTopItems(items: BackendTopItem[]): TopItem[] {
+  const total = items.reduce((s, i) => s + i.total_qty, 0);
+  return items.map((i) => ({
+    menuItemId: i.menu_item_id,
+    name: i.item_name,
+    quantity: i.total_qty,
+    revenue: i.total_value,
+    percentage: total > 0 ? Math.round((i.total_qty / total) * 100) : 0,
+  }));
+}
+
+function mapToInventoryItems(items: BackendRawMaterial[]): InventoryItem[] {
+  return items.map((i) => ({
+    id: i.id,
+    name: i.name,
+    sku: "-",
+    category: "Bahan Baku",
+    currentStock: Math.floor(i.current_stock),
+    minimumStock: Math.floor(i.minimum_stock),
+    unit: i.unit,
+    costPerUnit: 0,
+    updatedAt: i.updated_at ?? new Date().toISOString(),
+  }));
+}
+
+function mapToDailySales(sales: BackendDailySale[]): DailySales[] {
+  return sales.map((s) => ({
+    date: s.date,
+    totalOrders: s.orders,
+    totalRevenue: s.revenue,
+    totalTax: 0,
+    totalDiscount: 0,
+    averageOrderValue: s.orders > 0 ? Math.round(s.revenue / s.orders) : 0,
+  }));
+}
+
+// ── Page ──
 
 export default function OwnerDashboardPage() {
   const [period, setPeriod] = useState<PeriodPreset>("this-month");
-  const [isLoading] = useState(false);
+  const [data, setData] = useState<DashboardResponse | null>(null);
+  const [dailySales, setDailySales] = useState<DailySales[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const totalRevenue = mockDailySales.reduce((sum, d) => sum + d.totalRevenue, 0);
-  const totalOrders = mockDailySales.reduce((sum, d) => sum + d.totalOrders, 0);
-  const avgOrderValue = totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0;
-  const totalTax = mockDailySales.reduce((sum, d) => sum + d.totalTax, 0);
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    const range = periodToRange(period);
+    try {
+      const [dashboard, sales] = await Promise.all([
+        api.get<DashboardResponse>("/dashboard"),
+        api.get<BackendDailySale[]>(
+          `/reports/sales-chart?from=${range.from}&to=${range.to}`
+        ),
+      ]);
+      setData(dashboard);
+      setDailySales(mapToDailySales(sales));
+    } catch {
+      setData(null);
+      setDailySales([]);
+    }
+    setLoading(false);
+  }, [period]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Auto-refresh every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(fetchData, 30000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  const s = data?.summary;
+
+  // Derived values
+  const totalRevenue = s?.gross_revenue ?? 0;
+  const totalOrders = s?.total_transactions ?? 0;
+  const avgOrderValue =
+    totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0;
+  const grossProfit = s?.gross_profit ?? 0;
+  const totalOpex = s?.total_opex ?? 0;
+
+  const topItems = mapToTopItems(data?.top_items ?? []);
+  const lowStock = mapToInventoryItems(data?.low_stock ?? []);
+
+  if (loading && !data) {
+    return (
+      <div className="flex justify-center py-20">
+        <Spinner size="lg" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-dark-50">Dashboard</h1>
-          <p className="text-sm text-gray-500 dark:text-dark-400 mt-1">
-            Ringkasan bisnis restoran Anda
-          </p>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-dark-50">
+            Dashboard
+          </h1>
+          <Badge variant="info">Auto-refresh 30s</Badge>
         </div>
         <PeriodSelector value={period} onChange={setPeriod} />
       </div>
@@ -77,25 +203,23 @@ export default function OwnerDashboardPage() {
         <MetricCard
           icon={<DollarSign size={24} />}
           label="Gross Profit"
-          value={formatCurrency(totalRevenue)}
-          subtitle="Pendapatan kotor bulan ini"
-          trend={{ value: 12.5, isPositive: true }}
-          variant="success"
+          value={formatCurrency(grossProfit)}
+          subtitle="Pendapatan kotor periode ini"
+          trend={s ? { value: 0, isPositive: true } : undefined}
+          variant={grossProfit >= 0 ? "success" : "danger"}
         />
         <MetricCard
           icon={<TrendingDown size={24} />}
           label="Opex"
-          value={formatCurrency(12500000)}
+          value={formatCurrency(totalOpex)}
           subtitle="Total biaya operasional"
-          trend={{ value: 3.2, isPositive: false }}
           variant="warning"
         />
         <MetricCard
           icon={<ShoppingCart size={24} />}
           label="Total Pesanan"
           value={String(totalOrders)}
-          subtitle="Bulan ini"
-          trend={{ value: 8.1, isPositive: true }}
+          subtitle="Periode ini"
           variant="default"
         />
         <MetricCard
@@ -116,15 +240,21 @@ export default function OwnerDashboardPage() {
               {formatCurrency(totalRevenue)}
             </Badge>
           </CardHeader>
-          <SalesChart data={mockDailySales} isLoading={isLoading} period="month" />
+          <SalesChart data={dailySales} isLoading={loading} period="month" />
         </BentoItem>
 
         <BentoItem colSpan={1}>
           <CardHeader>
             <CardTitle>Item Terlaris</CardTitle>
-            <Badge variant="brand">{mockTopItems.length} item</Badge>
+            <Badge variant="brand">{topItems.length} item</Badge>
           </CardHeader>
-          <TopItemsChart items={mockTopItems} isLoading={isLoading} />
+          {topItems.length > 0 ? (
+            <TopItemsChart items={topItems} isLoading={loading} />
+          ) : (
+            <p className="text-sm text-gray-500 py-8 text-center">
+              Belum ada data penjualan.
+            </p>
+          )}
         </BentoItem>
       </BentoGrid>
 
@@ -133,9 +263,15 @@ export default function OwnerDashboardPage() {
         <BentoItem colSpan={1}>
           <CardHeader>
             <CardTitle>Stok Menipis</CardTitle>
-            <Badge variant="danger">{mockLowStock.length} item</Badge>
+            <Badge variant="danger">{lowStock.length} item</Badge>
           </CardHeader>
-          <LowStockCard items={mockLowStock} isLoading={isLoading} />
+          {lowStock.length > 0 ? (
+            <LowStockCard items={lowStock} isLoading={loading} />
+          ) : (
+            <p className="text-sm text-gray-500 py-8 text-center">
+              Semua stok aman.
+            </p>
+          )}
         </BentoItem>
 
         <BentoItem colSpan={1}>
@@ -144,32 +280,77 @@ export default function OwnerDashboardPage() {
             <Badge variant="info">Live</Badge>
           </CardHeader>
           <div className="space-y-4">
-            {[
-              { action: "Pesanan #1024", detail: "Rp 185.000 - Lunas", time: "2 menit lalu", type: "success" },
-              { action: "Pesanan #1023", detail: "Rp 92.000 - Lunas", time: "5 menit lalu", type: "success" },
-              { action: "Stok Opname", detail: "Minyak Goreng berkurang", time: "10 menit lalu", type: "warning" },
-              { action: "Shift Tutup", detail: "Kasir: Siti - Shift Pagi", time: "1 jam lalu", type: "info" },
-              { action: "Pesanan #1018", detail: "Rp 250.000 - Dibatalkan", time: "2 jam lalu", type: "danger" },
-            ].map((activity, i) => (
-              <div key={i} className="flex items-start gap-3">
-                <div className={`mt-1 w-2 h-2 rounded-full shrink-0 ${
-                  activity.type === "success" ? "bg-green-500" :
-                  activity.type === "warning" ? "bg-yellow-500" :
-                  activity.type === "danger" ? "bg-red-500" : "bg-blue-500"
-                }`} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 dark:text-dark-50">
-                    {activity.action}
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-dark-400">
-                    {activity.detail}
-                  </p>
-                </div>
-                <span className="text-xs text-gray-400 dark:text-dark-500 shrink-0">
-                  {activity.time}
-                </span>
+            {loading ? (
+              <div className="space-y-3 p-3">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <div className="w-2 h-2 bg-gray-200 dark:bg-dark-700 rounded-full animate-pulse" />
+                    <div className="flex-1 space-y-1">
+                      <div className="h-3 bg-gray-200 dark:bg-dark-700 rounded w-3/4 animate-pulse" />
+                      <div className="h-2 bg-gray-200 dark:bg-dark-700 rounded w-1/2 animate-pulse" />
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            ) : (
+              [
+                {
+                  action: "Pesanan #1024",
+                  detail: "Rp 185.000 - Lunas",
+                  time: "2 menit lalu",
+                  type: "success" as const,
+                },
+                {
+                  action: "Pesanan #1023",
+                  detail: "Rp 92.000 - Lunas",
+                  time: "5 menit lalu",
+                  type: "success" as const,
+                },
+                {
+                  action: "Stok Opname",
+                  detail: "Minyak Goreng berkurang",
+                  time: "10 menit lalu",
+                  type: "warning" as const,
+                },
+                {
+                  action: "Shift Tutup",
+                  detail: "Kasir: Siti - Shift Pagi",
+                  time: "1 jam lalu",
+                  type: "info" as const,
+                },
+                {
+                  action: "Pesanan #1018",
+                  detail: "Rp 250.000 - Dibatalkan",
+                  time: "2 jam lalu",
+                  type: "danger" as const,
+                },
+              ].map((activity, i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <div
+                    className={`mt-1 w-2 h-2 rounded-full shrink-0 ${
+                      activity.type === "success"
+                        ? "bg-green-500"
+                        : activity.type === "warning"
+                          ? "bg-yellow-500"
+                          : activity.type === "danger"
+                            ? "bg-red-500"
+                            : "bg-blue-500"
+                    }`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 dark:text-dark-50">
+                      {activity.action}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-dark-400">
+                      {activity.detail}
+                    </p>
+                  </div>
+                  <span className="text-xs text-gray-400 dark:text-dark-500 shrink-0">
+                    {activity.time}
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         </BentoItem>
       </BentoGrid>

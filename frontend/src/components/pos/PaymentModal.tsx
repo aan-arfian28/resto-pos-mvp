@@ -13,6 +13,7 @@ interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   onPaymentComplete: (method: PaymentMethod, amount: number, change: number) => void;
+  total?: number;
 }
 
 const paymentMethods: { value: PaymentMethod; label: string; icon: React.ReactNode }[] = [
@@ -23,8 +24,9 @@ const paymentMethods: { value: PaymentMethod; label: string; icon: React.ReactNo
   { value: "ovo", label: "OVO", icon: <Smartphone size={24} /> },
 ];
 
-export function PaymentModal({ isOpen, onClose, onPaymentComplete }: PaymentModalProps) {
-  const { grandTotal, subtotal } = useCartStore();
+export function PaymentModal({ isOpen, onClose, onPaymentComplete, total }: PaymentModalProps) {
+  const { grandTotal: storeGrandTotal, subtotal } = useCartStore();
+  const grandTotal = total ?? storeGrandTotal;
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod | null>(null);
   const [cashAmount, setCashAmount] = useState<string>(String(grandTotal));
   const [error, setError] = useState<string | null>(null);

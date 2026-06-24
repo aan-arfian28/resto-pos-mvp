@@ -1,22 +1,14 @@
 import { api } from "./api";
-import type { MenuItem, MenuCategory } from "@/types";
+import type { MenuItem, Category } from "@/types";
 
 export const menuService = {
-  getMenu: async (params?: { categoryId?: string; isAvailable?: boolean }): Promise<MenuItem[]> => {
-    const queryParams = new URLSearchParams();
-    if (params?.categoryId) queryParams.set("categoryId", params.categoryId);
-    if (params?.isAvailable !== undefined) queryParams.set("isAvailable", String(params.isAvailable));
-
-    const query = queryParams.toString();
-    return api.get<MenuItem[]>(`/menu${query ? `?${query}` : ""}`);
+  // Menu Items
+  getMenuItems: async (): Promise<MenuItem[]> => {
+    return api.get<MenuItem[]>("/menu");
   },
 
   getMenuItem: async (id: string): Promise<MenuItem> => {
     return api.get<MenuItem>(`/menu/${id}`);
-  },
-
-  getCategories: async (): Promise<MenuCategory[]> => {
-    return api.get<MenuCategory[]>("/menu/categories");
   },
 
   createMenuItem: async (data: Partial<MenuItem>): Promise<MenuItem> => {
@@ -31,7 +23,20 @@ export const menuService = {
     return api.delete<void>(`/menu/${id}`);
   },
 
-  toggleAvailability: async (id: string): Promise<MenuItem> => {
-    return api.patch<MenuItem>(`/menu/${id}/availability`);
+  // Categories
+  getCategories: async (): Promise<Category[]> => {
+    return api.get<Category[]>("/categories");
+  },
+
+  createCategory: async (data: { name: string; parent_id?: string }): Promise<Category> => {
+    return api.post<Category>("/categories", data);
+  },
+
+  updateCategory: async (id: string, data: { name?: string; parent_id?: string }): Promise<Category> => {
+    return api.put<Category>(`/categories/${id}`, data);
+  },
+
+  deleteCategory: async (id: string): Promise<void> => {
+    return api.delete<void>(`/categories/${id}`);
   },
 };

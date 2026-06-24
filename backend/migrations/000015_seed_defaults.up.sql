@@ -6,9 +6,13 @@ INSERT INTO settings (key, value, description) VALUES
 ON CONFLICT (key) DO NOTHING;
 
 -- Seed default owner account (password: admin123)
--- bcrypt hash for 'admin123' with cost 12
 INSERT INTO users (username, password_hash, role, full_name) VALUES
-    ('owner', '$2a$12$LJ3m4ys3Lk0TSwHCpNqrXeSqE2gqB5J8XPGxKxU8BvRmP7GqVqO6W', 'owner', 'Admin Utama')
+    ('owner', '$2a$10$9m7OPpdePUwGp8OShYAKDOKEFKmx5txKF6r.fh3khf6lcVXj6J3aS', 'owner', 'Admin Utama')
+ON CONFLICT (username) DO NOTHING;
+
+-- Seed default cashier account (password: cashier123)
+INSERT INTO users (username, password_hash, role, full_name) VALUES
+    ('cashier', '$2a$10$jvkB4kmfD0fjuYOUp3mWpeOA01s7jS0pLCqEFlkDmsWVXgN91z7oi', 'cashier', 'Kasir 01')
 ON CONFLICT (username) DO NOTHING;
 
 -- Seed sample categories

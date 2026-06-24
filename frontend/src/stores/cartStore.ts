@@ -1,18 +1,29 @@
 "use client";
 
 import { create } from "zustand";
-import type { OrderItem, VoidReason, PaymentMethod } from "@/types";
 import { calculateTax } from "@/lib/taxCalculator";
 
+// Internal cart item (UI-friendly, not the same as backend OrderItem)
+interface CartItem {
+  id: string;
+  menuItemId: string;
+  name: string;
+  price: number;
+  quantity: number;
+  notes?: string;
+  isVoided: boolean;
+  voidReason?: string;
+  subtotal: number;
+}
+
 interface PaymentState {
-  method: PaymentMethod | null;
+  method: string;
   amount: number;
   change: number;
 }
 
 interface CartState {
-  items: OrderItem[];
-  notes: string;
+  items: CartItem[];
   payment: PaymentState | null;
   isPaid: boolean;
 
@@ -20,41 +31,36 @@ interface CartState {
   subtotal: number;
   taxRate: number;
   taxAmount: number;
-  serviceCharge: number;
-  serviceChargeRate: number;
   grandTotal: number;
   itemCount: number;
 
   // Actions
-  addItem: (item: {
-    menuItemId: string;
-    name: string;
-    price: number;
-    spiceLevel?: number;
-    notes?: string;
-  }) => void;
+  addItem: (item: { menuItemId: string; name: string; price: number; notes?: string }) => void;
   removeItem: (itemId: string) => void;
   updateQuantity: (itemId: string, quantity: number) => void;
-  updateSpiceLevel: (itemId: string, spiceLevel: number) => void;
-  updateItemNotes: (itemId: string, notes: string) => void;
-  voidItem: (itemId: string, reason: VoidReason) => void;
-  setNotes: (notes: string) => void;
-  setPayment: (method: PaymentMethod, amount: number, change: number) => void;
+  voidItem: (itemId: string, reason: string) => void;
+  setPayment: (method: string, amount: number, change: number) => void;
   clearPayment: () => void;
-  markAsPaid: () => void;
   clearCart: () => void;
   setTaxRate: (rate: number) => void;
-  setServiceChargeRate: (rate: number) => void;
   recalculate: () => void;
+
+  // Export for API call
+  buildOrderPayload: (shiftId: string, orderType: string, tableNumber: string | null) => {
+    shift_id: string;
+    type: string;
+    table_number: string | null;
+    items: { menu_item_id: string; quantity: number; price: number; notes?: string }[];
+    payment_method: string;
+    amount_received?: number;
+    original_timestamp: string;
+  };
 }
 
-const TAX_RATE = 0.11;
-const SERVICE_CHARGE_RATE = 0.05;
+const DEFAULT_TAX_RATE = 0.11;
 
-function calculateItemsTotal(items: OrderItem[]): number {
-  return items
-    .filter((item) => !item.isVoided)
-    .reduce((sum, item) => sum + item.subtotal, 0);
+function calculateItemsTotal(items: CartItem[]): number {
+  return items.filter((item) => !item.isVoided).reduce((sum, item) => sum + item.subtotal, 0);
 }
 
 function generateItemId(): string {
@@ -63,47 +69,36 @@ function generateItemId(): string {
 
 export const useCartStore = create<CartState>((set, get) => ({
   items: [],
-  notes: "",
   payment: null,
   isPaid: false,
   subtotal: 0,
-  taxRate: TAX_RATE,
+  taxRate: DEFAULT_TAX_RATE,
   taxAmount: 0,
-  serviceCharge: 0,
-  serviceChargeRate: SERVICE_CHARGE_RATE,
   grandTotal: 0,
   itemCount: 0,
 
   addItem: (item) => {
     const { items } = get();
-
-    // Check if item already exists in cart (without spice/notes distinction for simplicity)
-    const existing = items.find(
-      (i) => i.menuItemId === item.menuItemId && !i.isVoided
-    );
+    const existing = items.find((i) => i.menuItemId === item.menuItemId && !i.isVoided);
 
     if (existing) {
       const updated = items.map((i) =>
-        i.id === existing.id
-          ? { ...i, quantity: i.quantity + 1, subtotal: (i.quantity + 1) * i.price }
-          : i
+        i.id === existing.id ? { ...i, quantity: i.quantity + 1, subtotal: (i.quantity + 1) * i.price } : i
       );
       set({ items: updated });
     } else {
-      const newItem: OrderItem = {
+      const newItem: CartItem = {
         id: generateItemId(),
         menuItemId: item.menuItemId,
         name: item.name,
         price: item.price,
         quantity: 1,
-        spiceLevel: item.spiceLevel as 0 | 1 | 2 | 3 | undefined,
         notes: item.notes,
         isVoided: false,
         subtotal: item.price,
       };
       set({ items: [...items, newItem] });
     }
-
     get().recalculate();
   },
 
@@ -113,103 +108,56 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
 
   updateQuantity: (itemId, quantity) => {
-    if (quantity < 1) {
-      get().removeItem(itemId);
-      return;
-    }
+    if (quantity < 1) { get().removeItem(itemId); return; }
     const updated = get().items.map((i) =>
-      i.id === itemId
-        ? { ...i, quantity, subtotal: quantity * i.price }
-        : i
+      i.id === itemId ? { ...i, quantity, subtotal: quantity * i.price } : i
     );
     set({ items: updated });
     get().recalculate();
-  },
-
-  updateSpiceLevel: (itemId, spiceLevel) => {
-    const updated = get().items.map((i) =>
-      i.id === itemId ? { ...i, spiceLevel: spiceLevel as 0 | 1 | 2 | 3 } : i
-    );
-    set({ items: updated });
-  },
-
-  updateItemNotes: (itemId, notes) => {
-    const updated = get().items.map((i) =>
-      i.id === itemId ? { ...i, notes } : i
-    );
-    set({ items: updated });
   },
 
   voidItem: (itemId, reason) => {
     const updated = get().items.map((i) =>
-      i.id === itemId
-        ? {
-            ...i,
-            isVoided: true,
-            voidReason: reason,
-            voidedAt: new Date().toISOString(),
-          }
-        : i
+      i.id === itemId ? { ...i, isVoided: true, voidReason: reason } : i
     );
     set({ items: updated });
     get().recalculate();
   },
 
-  setNotes: (notes) => set({ notes }),
-
-  setPayment: (method, amount, change) => {
-    set({ payment: { method, amount, change } });
-  },
-
-  clearPayment: () => {
-    set({ payment: null });
-  },
-
-  markAsPaid: () => {
-    set({ isPaid: true });
-  },
-
-  clearCart: () => {
-    set({
-      items: [],
-      notes: "",
-      payment: null,
-      isPaid: false,
-      subtotal: 0,
-      taxAmount: 0,
-      serviceCharge: 0,
-      grandTotal: 0,
-      itemCount: 0,
-    });
-  },
-
-  setTaxRate: (rate) => {
-    set({ taxRate: rate });
-    get().recalculate();
-  },
-
-  setServiceChargeRate: (rate) => {
-    set({ serviceChargeRate: rate });
-    get().recalculate();
-  },
+  setPayment: (method, amount, change) => set({ payment: { method, amount, change } }),
+  clearPayment: () => set({ payment: null }),
+  clearCart: () => set({ items: [], payment: null, isPaid: false, subtotal: 0, taxAmount: 0, grandTotal: 0, itemCount: 0 }),
+  setTaxRate: (rate) => { set({ taxRate: rate }); get().recalculate(); },
 
   recalculate: () => {
-    const { items, taxRate, serviceChargeRate } = get();
+    const { items, taxRate } = get();
     const subtotal = calculateItemsTotal(items);
     const nonVoided = items.filter((i) => !i.isVoided);
     const itemCount = nonVoided.reduce((sum, i) => sum + i.quantity, 0);
+    const taxAmount = subtotal * taxRate;
+    const grandTotal = subtotal + taxAmount;
 
-    const taxResult = calculateTax(subtotal, {
-      taxRate,
-      serviceChargeRate,
-    });
+    set({ subtotal, itemCount, taxAmount, grandTotal });
+  },
 
-    set({
-      subtotal,
-      itemCount,
-      serviceCharge: taxResult.serviceCharge,
-      taxAmount: taxResult.taxAmount,
-      grandTotal: taxResult.grandTotal,
-    });
+  buildOrderPayload: (shiftId, orderType, tableNumber) => {
+    const { items, payment, subtotal, taxAmount, grandTotal, taxRate } = get();
+    const activeItems = items.filter((i) => !i.isVoided);
+
+    return {
+      shift_id: shiftId,
+      type: orderType,
+      table_number: tableNumber,
+      items: activeItems.map((i) => ({
+        menu_item_id: i.menuItemId,
+        quantity: i.quantity,
+        price: i.price,
+        notes: i.notes,
+      })),
+      payment_method: payment?.method || "cash",
+      amount_received: payment?.amount,
+      original_timestamp: new Date().toISOString(),
+    };
   },
 }));
+

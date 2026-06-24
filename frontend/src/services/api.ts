@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080/api/v1";
 
 interface ApiOptions extends RequestInit {
   skipAuth?: boolean;
@@ -52,8 +52,8 @@ async function request<T>(endpoint: string, options: ApiOptions = {}): Promise<T
   if (!response.ok) {
     if (response.status === 401) {
       clearAuth();
-      if (typeof window !== "undefined") {
-        window.location.href = "/login";
+      if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+        window.location.replace("/login");
       }
     }
 
@@ -75,7 +75,14 @@ async function request<T>(endpoint: string, options: ApiOptions = {}): Promise<T
     return undefined as T;
   }
 
-  return response.json();
+  const json = await response.json();
+
+  // Unwrap backend standard envelope: { status: "success", data: ..., message: ... }
+  if (json && typeof json === "object" && "status" in json && "data" in json) {
+    return json.data as T;
+  }
+
+  return json as T;
 }
 
 export const api = {

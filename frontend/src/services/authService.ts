@@ -8,21 +8,32 @@ interface LoginRequest {
 
 interface LoginResponse {
   token: string;
-  user: User;
+  user_id: string;
+  username: string;
+  role: User["role"];
+  full_name: string;
 }
 
 export const authService = {
-  login: async (credentials: LoginRequest): Promise<LoginResponse> => {
+  login: async (credentials: LoginRequest): Promise<{ token: string; user: User }> => {
     const response = await api.post<LoginResponse>("/auth/login", credentials, {
       skipAuth: true,
     });
 
+    // Backend returns flat fields; build the User object
+    const user: User = {
+      id: response.user_id,
+      username: response.username,
+      role: response.role,
+      full_name: response.full_name,
+    };
+
     if (typeof window !== "undefined") {
       localStorage.setItem("bf_token", response.token);
-      localStorage.setItem("bf_user", JSON.stringify(response.user));
+      localStorage.setItem("bf_user", JSON.stringify(user));
     }
 
-    return response;
+    return { token: response.token, user };
   },
 
   getProfile: async (): Promise<User> => {

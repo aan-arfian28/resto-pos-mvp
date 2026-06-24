@@ -8,11 +8,15 @@ export interface DailySales {
 }
 
 export interface TopItem {
-  menuItemId: string;
-  name: string;
-  quantity: number;
-  revenue: number;
-  percentage: number;
+  menu_item_id?: string;
+  menuItemId?: string;
+  item_name?: string;
+  name?: string;
+  total_qty?: number;
+  quantity?: number;
+  total_value?: number;
+  revenue?: number;
+  percentage?: number;
 }
 
 export interface SalesSummary {

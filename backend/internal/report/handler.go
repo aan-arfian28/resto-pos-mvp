@@ -72,12 +72,16 @@ func (h *Handler) ExportPDF(c *gin.Context) {
 	topItems, _ := h.service.GetTopItems(from, to, 10)
 	sales, _ := h.service.GetDailySales(from, to)
 
-	c.JSON(http.StatusOK, gin.H{
-		"period":    gin.H{"from": from, "to": to},
-		"summary":   summary,
-		"top_items": topItems,
-		"sales":     sales,
-	})
+	pdfData, err := GeneratePDFReport(summary, topItems, sales, from, to)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "Failed to generate PDF")
+		return
+	}
+
+	filename := fmt.Sprintf("laporan_%s_%s.pdf", from[:10], to[:10])
+	c.Header("Content-Disposition", "attachment; filename="+filename)
+	c.Header("Content-Type", "application/pdf")
+	c.Data(http.StatusOK, "application/pdf", pdfData)
 }
 
 func getDateRange(c *gin.Context) (string, string) {

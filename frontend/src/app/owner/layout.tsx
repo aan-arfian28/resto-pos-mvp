@@ -56,19 +56,33 @@ export default function OwnerLayout({
   const router = useRouter();
   const pathname = usePathname();
   const { theme, setTheme } = useTheme();
-  const { user, isAuthenticated, isLoading, checkAuth, logout } = useAuthStore();
+  const { user, isAuthenticated, isLoading, logout } = useAuthStore();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
+    // Single effect: check auth, then decide redirect — no race condition
+    const token = localStorage.getItem("bf_token");
+    const storedUser = localStorage.getItem("bf_user");
 
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.push("/login");
+    if (!token || token === "undefined" || !storedUser || storedUser === "undefined") {
+      localStorage.removeItem("bf_token");
+      localStorage.removeItem("bf_user");
+      window.location.replace("/login");
+      return;
     }
-  }, [isLoading, isAuthenticated, router]);
+
+    try {
+      const user = JSON.parse(storedUser);
+      if (!user?.role) throw new Error("bad user");
+      // Valid — update Zustand
+      useAuthStore.setState({ user, token, isAuthenticated: true, isLoading: false });
+    } catch {
+      localStorage.removeItem("bf_token");
+      localStorage.removeItem("bf_user");
+      window.location.replace("/login");
+    }
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -100,7 +114,7 @@ export default function OwnerLayout({
         className={`
           fixed top-0 left-0 z-50 h-full w-64 bg-white dark:bg-dark-800 border-r border-gray-200 dark:border-dark-700
           transform transition-transform duration-300 ease-in-out
-          lg:translate-x-0 lg:static lg:z-auto
+          lg:translate-x-0
           ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
         `}
       >
@@ -192,11 +206,11 @@ export default function OwnerLayout({
                   className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-dark-700 transition-colors"
                 >
                   <div className="w-8 h-8 rounded-full bg-brand-600 flex items-center justify-center text-white text-sm font-bold">
-                    {user?.fullName?.charAt(0) || "U"}
+                    {user?.full_name?.charAt(0) || "U"}
                   </div>
                   <div className="hidden sm:block text-left">
                     <p className="text-sm font-medium text-gray-900 dark:text-dark-50 leading-tight">
-                      {user?.fullName || "User"}
+                      {user?.full_name || "User"}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-dark-400 capitalize">
                       {user?.role || "Owner"}
@@ -214,7 +228,7 @@ export default function OwnerLayout({
                     <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-dark-800 rounded-xl shadow-lg border border-gray-200 dark:border-dark-700 py-1 z-20">
                       <div className="px-4 py-2 border-b border-gray-200 dark:border-dark-700">
                         <p className="text-sm font-medium text-gray-900 dark:text-dark-50">
-                          {user?.fullName}
+                          {user?.full_name}
                         </p>
                         <p className="text-xs text-gray-500 dark:text-dark-400">
                           {user?.username}
